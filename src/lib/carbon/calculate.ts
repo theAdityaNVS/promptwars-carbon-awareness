@@ -52,19 +52,23 @@ export function aggregateByPeriod(
 }
 
 /**
- * Compares actual weekly emissions against a user's baseline.
- * Returns percent deviations for each category.
+ * Compares actual weekly emissions (the 7 days ending at `asOf`, inclusive)
+ * against a user's baseline. Returns percent deviations for each category.
+ *
+ * `asOf` is supplied by the caller so this function stays pure / deterministic
+ * (no internal `new Date()`).
  */
 export function compareToBaseline(
   entries: LogEntry[],
-  baseline: UserBaseline
-): { deltaPercent: number; category: Category }[] {
-  // Aggregate emissions for the last 7 days of entries
-  const sevenDaysAgo = new Date()
+  baseline: UserBaseline,
+  asOf: Date
+): { deltaPercent: number | null; category: Category }[] {
+  // Aggregate emissions for the 7 days ending at asOf (inclusive)
+  const sevenDaysAgo = new Date(asOf)
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
   const range = {
     from: sevenDaysAgo.toISOString().split('T')[0],
-    to: new Date().toISOString().split('T')[0],
+    to: asOf.toISOString().split('T')[0],
   }
 
   const { byCategory } = aggregateByPeriod(entries, range)
@@ -102,18 +106,28 @@ export function compareToBaseline(
   const baselineEnergy = baseline.kwhPerWeek * EMISSION_FACTORS.kwh_grid
 
   const baselines: Record<Category, number> = {
-    transport: baselineTransport || 1, // Avoid division by zero
-    diet: baselineDiet || 1,
-    energy: baselineEnergy || 1,
+    transport: baselineTransport,
+    diet: baselineDiet,
+    energy: baselineEnergy,
   }
 
   return (['transport', 'diet', 'energy'] as Category[]).map((category) => {
     const actual = byCategory[category]
     const base = baselines[category]
-    const deltaPercent = ((actual - base) / base) * 100
+
+    let deltaPercent: number | null
+    if (base === 0) {
+      // Zero baseline: a finite percent deviation is meaningless.
+      // No usage against no baseline is "no change"; any usage against
+      // a true-zero baseline is an unbounded ("infinite") increase.
+      deltaPercent = actual === 0 ? 0 : null
+    } else {
+      deltaPercent = Math.round(((actual - base) / base) * 100 * 10) / 10
+    }
+
     return {
       category,
-      deltaPercent: Math.round(deltaPercent * 10) / 10,
+      deltaPercent,
     }
   })
 }

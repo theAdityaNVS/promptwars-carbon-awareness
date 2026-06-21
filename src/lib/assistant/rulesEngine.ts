@@ -1,4 +1,4 @@
-import { LogEntry, UserBaseline, Insight } from '@/types'
+import { LogEntry, UserBaseline, Insight, Category } from '@/types'
 import { EMISSION_FACTORS, AVERAGE_COMMUTER_BENCHMARKS } from '../carbon/factors'
 import { calculateEntryFootprint } from '../carbon/calculate'
 
@@ -19,7 +19,11 @@ export function generateInsights(
 
   const todayStr = new Date().toISOString().split('T')[0]
 
-  // --- HEURISTIC 1: Cold-Start Fallbacks (Fires when history is thin, < 3 entries) ---
+  // --- HEURISTIC 0: Cold-Start Fallbacks (Fires when history is thin, < 3 entries) ---
+  // Per spec: "treats userBaseline and the benchmark table as fallback context whenever
+  // real history is thin, so insights fire from entry #1." This branch MUST always
+  // produce at least one insight — either a corrective tip (above benchmark) or an
+  // affirming "you're already doing great" insight (below all benchmarks).
   if (sortedHistory.length < 3) {
     if (baseline) {
       // Compare baseline commute against standard benchmark
@@ -82,8 +86,43 @@ export function generateInsights(
           },
         })
       }
-    } else {
-      // Fresh start, no baseline, no history
+
+      // Finding #1 fix: if every metric is already below benchmark, none of the
+      // corrective branches above will have fired. Guarantee a real insight by
+      // affirming the strongest "below average" margin instead of returning [].
+      if (insights.length === 0) {
+        const commuteSavingsKg = benchmarkCommuteWeekly - weeklyCommuteEmissions
+        const benchmarkEnergyWeekly = AVERAGE_COMMUTER_BENCHMARKS.weekly_kwh * EMISSION_FACTORS.kwh_grid
+        const actualEnergyWeekly = baseline.kwhPerWeek * EMISSION_FACTORS.kwh_grid
+        const energySavingsKg = benchmarkEnergyWeekly - actualEnergyWeekly
+
+        // Pick whichever category shows the larger absolute savings to highlight.
+        if (commuteSavingsKg >= energySavingsKg) {
+          const percentBelow = benchmarkCommuteWeekly > 0
+            ? Math.round((commuteSavingsKg / benchmarkCommuteWeekly) * 100)
+            : 0
+          insights.push({
+            id: 'cold_affirm_commute',
+            category: 'transport',
+            severity: 'info',
+            message: `Nice work — your commute footprint is ${percentBelow}% below the average commuter (saving about ${commuteSavingsKg.toFixed(1)} kg CO2e/week). Keep it up!`,
+            estimatedImpactKg: Math.round(commuteSavingsKg * 10) / 10,
+          })
+        } else {
+          const percentBelow = benchmarkEnergyWeekly > 0
+            ? Math.round((energySavingsKg / benchmarkEnergyWeekly) * 100)
+            : 0
+          insights.push({
+            id: 'cold_affirm_energy',
+            category: 'energy',
+            severity: 'info',
+            message: `Nice work — your home energy usage is ${percentBelow}% below the average commuter benchmark (saving about ${energySavingsKg.toFixed(1)} kg CO2e/week). Keep it up!`,
+            estimatedImpactKg: Math.round(energySavingsKg * 10) / 10,
+          })
+        }
+      }
+    } else if (sortedHistory.length === 0) {
+      // Fresh start, no baseline, no history at all
       insights.push({
         id: 'cold_welcome',
         category: 'diet',
@@ -91,38 +130,183 @@ export function generateInsights(
         message: 'Welcome! Get started by setting up your baseline profile or logging your first action. Your assistant will analyze your progress and offer tips here.',
         estimatedImpactKg: 0,
       })
+    } else {
+      // Finding #2 fix: no baseline, but 1-2 real entries exist. Compare the most
+      // recent entry directly against AVERAGE_COMMUTER_BENCHMARKS rather than
+      // falling through to the generic welcome message.
+      const latestEntry = sortedHistory[sortedHistory.length - 1]
+      const entryFootprint = calculateEntryFootprint(latestEntry)
+
+      if (latestEntry.category === 'transport') {
+        // Benchmark is weekly; convert to a daily-equivalent so a single trip is
+        // comparable to a single day's average commute (weekly_km / 7 days at the
+        // benchmark's implied solo-car rate).
+        const dailyBenchmarkKg = (AVERAGE_COMMUTER_BENCHMARKS.weekly_km / 7) * EMISSION_FACTORS.car_solo
+        const diffPercent = dailyBenchmarkKg > 0
+          ? Math.round(((entryFootprint - dailyBenchmarkKg) / dailyBenchmarkKg) * 100)
+          : 0
+
+        if (entryFootprint > dailyBenchmarkKg) {
+          insights.push({
+            id: 'cold_entry_commute',
+            category: 'transport',
+            severity: 'info',
+            message: `Your ${latestEntry.quantity}${latestEntry.unit} ${latestEntry.subtype.replace('_', ' ')} trip is ${diffPercent}% above the average commuter's daily footprint.`,
+            estimatedImpactKg: Math.round((entryFootprint - dailyBenchmarkKg) * 10) / 10,
+            relatedAction: {
+              category: 'transport',
+              subtype: 'bus',
+              quantity: latestEntry.quantity,
+              unit: latestEntry.unit,
+              description: 'Took transit instead of driving solo',
+            },
+          })
+        } else {
+          insights.push({
+            id: 'cold_entry_commute_affirm',
+            category: 'transport',
+            severity: 'info',
+            message: `Nice work — your ${latestEntry.quantity}${latestEntry.unit} ${latestEntry.subtype.replace('_', ' ')} trip is ${Math.abs(diffPercent)}% below the average commuter's daily footprint.`,
+            estimatedImpactKg: Math.round((dailyBenchmarkKg - entryFootprint) * 10) / 10,
+          })
+        }
+      } else if (latestEntry.category === 'diet') {
+        const dailyBeefBenchmarkKg = (AVERAGE_COMMUTER_BENCHMARKS.weekly_beef / 7) * EMISSION_FACTORS.beef_meal
+        if (entryFootprint > dailyBeefBenchmarkKg) {
+          insights.push({
+            id: 'cold_entry_diet',
+            category: 'diet',
+            severity: 'info',
+            message: `Your logged ${latestEntry.subtype.replace('_', ' ')} has a higher footprint than the average commuter's typical daily diet emissions. Swapping in a plant-based meal can help.`,
+            estimatedImpactKg: Math.round((entryFootprint - dailyBeefBenchmarkKg) * 10) / 10,
+            relatedAction: {
+              category: 'diet',
+              subtype: 'vegetarian_meal',
+              quantity: 1,
+              unit: 'meal',
+              description: 'Substituted a beef meal for a vegetarian option',
+            },
+          })
+        } else {
+          insights.push({
+            id: 'cold_entry_diet_affirm',
+            category: 'diet',
+            severity: 'info',
+            message: `Nice work — your logged ${latestEntry.subtype.replace('_', ' ')} keeps you below the average commuter's typical daily diet emissions.`,
+            estimatedImpactKg: Math.round((dailyBeefBenchmarkKg - entryFootprint) * 10) / 10,
+          })
+        }
+      } else {
+        // energy
+        const dailyEnergyBenchmarkKg = (AVERAGE_COMMUTER_BENCHMARKS.weekly_kwh / 7) * EMISSION_FACTORS.kwh_grid
+        if (entryFootprint > dailyEnergyBenchmarkKg) {
+          insights.push({
+            id: 'cold_entry_energy',
+            category: 'energy',
+            severity: 'info',
+            message: `Your logged energy usage is above the average commuter's typical daily home energy footprint.`,
+            estimatedImpactKg: Math.round((entryFootprint - dailyEnergyBenchmarkKg) * 10) / 10,
+            relatedAction: {
+              category: 'energy',
+              subtype: 'kwh_grid',
+              quantity: 5,
+              unit: 'kWh',
+              description: 'Reduced home heating/cooling usage',
+            },
+          })
+        } else {
+          insights.push({
+            id: 'cold_entry_energy_affirm',
+            category: 'energy',
+            severity: 'info',
+            message: `Nice work — your logged energy usage is below the average commuter's typical daily home energy footprint.`,
+            estimatedImpactKg: Math.round((dailyEnergyBenchmarkKg - entryFootprint) * 10) / 10,
+          })
+        }
+      }
     }
 
     return insights.slice(0, 2) // Return top 2 cold start tips
   }
 
-  // --- HEURISTIC 2: Trend Checks (Requires >= 5 entries) ---
-  const transportEntries = sortedHistory.filter((e) => e.category === 'transport')
-  const soloCarCommutesThisWeek = transportEntries.filter((e) => {
-    const daysDiff = (new Date(todayStr).getTime() - new Date(e.date).getTime()) / (1000 * 3600 * 24)
-    return daysDiff <= 7 && e.subtype === 'car_solo'
-  })
+  // --- HEURISTIC 1 (trend): Week-over-week per-category comparison (needs >= 2 weeks of history) ---
+  // Spec: "this-week vs last-week per category, e.g. '3+ solo car trips this week vs
+  // last week -> suggest carpooling/transit.'" Gated on the earliest entry being at
+  // least 14 days old, since comparing two windows is meaningless without 2 full weeks.
+  const earliestEntry = sortedHistory[0]
+  const earliestDaysAgo = earliestEntry
+    ? (new Date(todayStr).getTime() - new Date(earliestEntry.date).getTime()) / (1000 * 3600 * 24)
+    : 0
 
-  if (soloCarCommutesThisWeek.length >= 3) {
-    const totalKm = soloCarCommutesThisWeek.reduce((acc, curr) => acc + curr.quantity, 0)
-    // Suggest taking transit or biking
-    insights.push({
-      id: 'trend_solo_car',
-      category: 'transport',
-      severity: 'warning',
-      message: `You've logged ${soloCarCommutesThisWeek.length} solo car trips in the last week totaling ${totalKm} km. Switching some to carpools or electric vehicles could cut emissions in half.`,
-      estimatedImpactKg: Math.round(totalKm * (EMISSION_FACTORS.car_solo - EMISSION_FACTORS.car_shared) * 10) / 10,
-      relatedAction: {
-        category: 'transport',
-        subtype: 'car_shared',
-        quantity: Math.round(totalKm / soloCarCommutesThisWeek.length),
-        unit: 'km',
-        description: 'Carpooled to work instead of solo driving',
-      },
+  if (earliestDaysAgo >= 14) {
+    const thisWeek = sortedHistory.filter((e) => {
+      const daysDiff = (new Date(todayStr).getTime() - new Date(e.date).getTime()) / (1000 * 3600 * 24)
+      return daysDiff >= 0 && daysDiff < 7
     })
+    const lastWeek = sortedHistory.filter((e) => {
+      const daysDiff = (new Date(todayStr).getTime() - new Date(e.date).getTime()) / (1000 * 3600 * 24)
+      return daysDiff >= 7 && daysDiff < 14
+    })
+
+    // Spec's own example is solo car trips, but generalize the count comparison to
+    // each category's most emitting subtype so the heuristic isn't transport-only.
+    const countBySubtype = (entries: LogEntry[], category: Category, subtype: string) =>
+      entries.filter((e) => e.category === category && e.subtype === subtype).length
+
+    const trendCandidates: { category: Category; subtype: string }[] = [
+      { category: 'transport', subtype: 'car_solo' },
+      { category: 'diet', subtype: 'beef_meal' },
+    ]
+
+    for (const { category, subtype } of trendCandidates) {
+      const thisWeekCount = countBySubtype(thisWeek, category, subtype)
+      const lastWeekCount = countBySubtype(lastWeek, category, subtype)
+
+      // "Meaningful increase": at least 3 occurrences this week (mirrors the spec's
+      // "3+ solo car trips" example) AND an increase of at least 1 over last week.
+      if (thisWeekCount >= 3 && thisWeekCount > lastWeekCount) {
+        if (category === 'transport') {
+          const thisWeekKm = thisWeek
+            .filter((e) => e.category === category && e.subtype === subtype)
+            .reduce((acc, curr) => acc + curr.quantity, 0)
+          const impactKg = thisWeekKm * (EMISSION_FACTORS.car_solo - EMISSION_FACTORS.car_shared)
+          insights.push({
+            id: 'trend_solo_car',
+            category: 'transport',
+            severity: 'warning',
+            message: `You've logged ${thisWeekCount} solo car trips this week, up from ${lastWeekCount} last week (totaling ${thisWeekKm} km). Switching some to carpools or transit could cut emissions in half.`,
+            estimatedImpactKg: Math.round(impactKg * 10) / 10,
+            relatedAction: {
+              category: 'transport',
+              subtype: 'car_shared',
+              quantity: Math.round(thisWeekKm / thisWeekCount),
+              unit: 'km',
+              description: 'Carpooled to work instead of solo driving',
+            },
+          })
+        } else {
+          const impactKg = (EMISSION_FACTORS.beef_meal - EMISSION_FACTORS.vegetarian_meal) * (thisWeekCount - lastWeekCount)
+          insights.push({
+            id: 'trend_beef_meals',
+            category: 'diet',
+            severity: 'warning',
+            message: `You've logged ${thisWeekCount} beef meals this week, up from ${lastWeekCount} last week. Swapping one for a plant-based meal can help reverse the trend.`,
+            estimatedImpactKg: Math.round(impactKg * 10) / 10,
+            relatedAction: {
+              category: 'diet',
+              subtype: 'vegetarian_meal',
+              quantity: 1,
+              unit: 'meal',
+              description: 'Substituted a beef meal for a vegetarian option',
+            },
+          })
+        }
+        break // Only flag one trend at a time, matching the existing single-spike convention
+      }
+    }
   }
 
-  // --- HEURISTIC 3: Frequency / Diet Habits ---
+  // --- HEURISTIC 2: Frequency / Diet Habits ---
   const dietEntries = sortedHistory.filter((e) => e.category === 'diet')
   const beefMealsThisWeek = dietEntries.filter((e) => {
     const daysDiff = (new Date(todayStr).getTime() - new Date(e.date).getTime()) / (1000 * 3600 * 24)
@@ -146,7 +330,7 @@ export function generateInsights(
     })
   }
 
-  // --- HEURISTIC 4: Spike Detection (1 single action exceeds 2x rolling category average) ---
+  // --- HEURISTIC 3: Spike Detection (1 single action exceeds 2x rolling category average) ---
   for (const entry of sortedHistory) {
     // Only check recent entries (last 3 days)
     const daysDiff = (new Date(todayStr).getTime() - new Date(entry.date).getTime()) / (1000 * 3600 * 24)
@@ -175,12 +359,16 @@ export function generateInsights(
 
   // Fallback: general sustainablity tips if no other heuristics triggered
   if (insights.length === 0) {
+    // estimatedImpactKg = avoided emissions of the suggested action (walking 1.5 km)
+    // versus driving that same distance solo, derived from EMISSION_FACTORS rather
+    // than a hardcoded constant.
+    const walkVsSoloCarImpactKg = 1.5 * EMISSION_FACTORS.car_solo
     insights.push({
       id: 'general_eco',
       category: 'energy',
       severity: 'info',
       message: 'Great job maintaining your logs! Small actions like turning off unused electronics, walking for trips under 2 km, and air-drying laundry keep your emissions low.',
-      estimatedImpactKg: 1.2,
+      estimatedImpactKg: Math.round(walkVsSoloCarImpactKg * 10) / 10,
       relatedAction: {
         category: 'transport',
         subtype: 'walk',

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { calculateEntryFootprint, aggregateByPeriod } from './calculate'
-import { LogEntry } from '@/types'
+import { calculateEntryFootprint, aggregateByPeriod, compareToBaseline } from './calculate'
+import { LogEntry, UserBaseline } from '@/types'
 
 describe('Carbon Footprint Calculation Core', () => {
   describe('calculateEntryFootprint', () => {
@@ -60,6 +60,97 @@ describe('Carbon Footprint Calculation Core', () => {
       const res = aggregateByPeriod(sampleEntries, { from: '2026-06-19', to: '2026-06-20' })
       expect(res.total).toBeCloseTo(10.5, 2) // 6.0 + 4.5
       expect(res.byCategory.transport).toBe(0)
+    })
+  })
+
+  describe('compareToBaseline', () => {
+    const asOf = new Date('2026-06-21T00:00:00.000Z')
+
+    it('should be deterministic for the same inputs regardless of when it is called', () => {
+      const entries: LogEntry[] = [
+        { id: '1', date: '2026-06-20', category: 'transport', subtype: 'car_solo', quantity: 50, unit: 'km' },
+      ]
+      const baseline: UserBaseline = {
+        commuteMode: 'car_solo',
+        commuteKmPerWeek: 100, // baseline transport = 100 * 0.192 = 19.2 kg
+        dietPattern: 'low_meat',
+        kwhPerWeek: 50,
+      }
+
+      const resultA = compareToBaseline(entries, baseline, asOf)
+      const resultB = compareToBaseline(entries, baseline, asOf)
+      expect(resultA).toEqual(resultB)
+    })
+
+    it('should compute a normal nonzero-baseline percent deviation for transport', () => {
+      const entries: LogEntry[] = [
+        // 50 km solo car within the last 7 days -> 50 * 0.192 = 9.6 kg
+        { id: '1', date: '2026-06-20', category: 'transport', subtype: 'car_solo', quantity: 50, unit: 'km' },
+      ]
+      const baseline: UserBaseline = {
+        commuteMode: 'car_solo',
+        commuteKmPerWeek: 100, // baseline transport = 100 * 0.192 = 19.2 kg
+        dietPattern: 'low_meat',
+        kwhPerWeek: 50,
+      }
+
+      const result = compareToBaseline(entries, baseline, asOf)
+      const transport = result.find((r) => r.category === 'transport')
+
+      // (9.6 - 19.2) / 19.2 * 100 = -50%
+      expect(transport?.deltaPercent).toBeCloseTo(-50, 1)
+    })
+
+    it('should return null deltaPercent when baseline is zero and actual usage is nonzero', () => {
+      const entries: LogEntry[] = [
+        // Logged a solo car trip even though the user's baseline commute mode is biking (zero factor)
+        { id: '1', date: '2026-06-20', category: 'transport', subtype: 'car_solo', quantity: 10, unit: 'km' },
+      ]
+      const baseline: UserBaseline = {
+        commuteMode: 'bike', // baseline transport = commuteKmPerWeek * 0 = 0
+        commuteKmPerWeek: 50,
+        dietPattern: 'low_meat',
+        kwhPerWeek: 50,
+      }
+
+      const result = compareToBaseline(entries, baseline, asOf)
+      const transport = result.find((r) => r.category === 'transport')
+
+      expect(transport?.deltaPercent).toBeNull()
+    })
+
+    it('should return 0 deltaPercent when both baseline and actual are zero', () => {
+      const entries: LogEntry[] = []
+      const baseline: UserBaseline = {
+        commuteMode: 'car_solo',
+        commuteKmPerWeek: 100,
+        dietPattern: 'low_meat',
+        kwhPerWeek: 0, // baseline energy = 0
+      }
+
+      const result = compareToBaseline(entries, baseline, asOf)
+      const energy = result.find((r) => r.category === 'energy')
+
+      expect(energy?.deltaPercent).toBe(0)
+    })
+
+    it('should compute a normal nonzero-baseline percent deviation for energy', () => {
+      const entries: LogEntry[] = [
+        // 20 kWh within the last 7 days -> 20 * 0.45 = 9.0 kg
+        { id: '1', date: '2026-06-19', category: 'energy', subtype: 'kwh_grid', quantity: 20, unit: 'kWh' },
+      ]
+      const baseline: UserBaseline = {
+        commuteMode: 'car_solo',
+        commuteKmPerWeek: 100,
+        dietPattern: 'low_meat',
+        kwhPerWeek: 50, // baseline energy = 50 * 0.45 = 22.5 kg
+      }
+
+      const result = compareToBaseline(entries, baseline, asOf)
+      const energy = result.find((r) => r.category === 'energy')
+
+      // (9.0 - 22.5) / 22.5 * 100 = -60%
+      expect(energy?.deltaPercent).toBeCloseTo(-60, 1)
     })
   })
 })
