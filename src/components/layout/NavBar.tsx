@@ -37,6 +37,7 @@ export const NavBar: React.FC = () => {
                 <Link
                   key={item.path}
                   href={item.path}
+                  aria-current={isActive ? 'page' : undefined}
                   className={`px-3.5 py-2 rounded-xl text-sm font-medium transition-all duration-300 ${
                     isActive
                       ? 'bg-violet-500/10 text-violet-400 border border-violet-500/20 shadow-sm shadow-violet-500/5'
