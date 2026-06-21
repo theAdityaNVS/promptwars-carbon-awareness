@@ -1,10 +1,10 @@
 'use client'
 
-import React, { useState, useEffect, Suspense } from 'react'
+import React, { useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { z } from 'zod'
 import { useLogStore } from '@/lib/state/useLogStore'
-import { Category, TransportMode } from '@/types'
+import { Category } from '@/types'
 import { Card } from '../ui/Card'
 import { Button } from '../ui/Button'
 import { CategorySelector } from './CategorySelector'
@@ -24,48 +24,32 @@ const ActionLogFormInner: React.FC = () => {
   const searchParams = useSearchParams()
   const { addEntry } = useLogStore()
 
-  // State fields
-  const [category, setCategory] = useState<Category>('transport')
-  const [subtype, setSubtype] = useState<string>('')
-  const [quantity, setQuantity] = useState<string>('')
-  const [date, setDate] = useState<string>('')
-  const [description, setDescription] = useState<string>('')
+  const catParam = searchParams.get('category') as Category
+  const subParam = searchParams.get('subtype')
+  const qtyParam = searchParams.get('quantity')
+  const descParam = searchParams.get('description')
+
+  // State fields initialized directly from search parameters
+  const [category, setCategory] = useState<Category>(() => {
+    if (catParam && ['transport', 'diet', 'energy'].includes(catParam)) {
+      return catParam
+    }
+    return 'transport'
+  })
+
+  const [subtype, setSubtype] = useState<string>(() => {
+    if (subParam) return subParam
+    const activeCat = catParam || 'transport'
+    if (activeCat === 'transport') return 'car_solo'
+    if (activeCat === 'diet') return 'beef_meal'
+    return 'kwh_grid'
+  })
+
+  const [quantity, setQuantity] = useState<string>(() => qtyParam || '')
+  const [date, setDate] = useState<string>(() => new Date().toISOString().split('T')[0])
+  const [description, setDescription] = useState<string>(() => descParam || '')
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [showSuccess, setShowSuccess] = useState(false)
-
-  // Initialize and handle query parameters pre-fill
-  useEffect(() => {
-    // Set default date to today in YYYY-MM-DD local timezone
-    const todayStr = new Date().toISOString().split('T')[0]
-    setDate(todayStr)
-
-    const catParam = searchParams.get('category') as Category
-    const subParam = searchParams.get('subtype')
-    const qtyParam = searchParams.get('quantity')
-    const descParam = searchParams.get('description')
-
-    if (catParam && ['transport', 'diet', 'energy'].includes(catParam)) {
-      setCategory(catParam)
-    }
-    if (subParam) {
-      setSubtype(subParam)
-    } else {
-      // Set sensible default subtype when category changes
-      if (catParam === 'transport' || (!catParam && category === 'transport')) {
-        setSubtype('car_solo')
-      } else if (catParam === 'diet') {
-        setSubtype('beef_meal')
-      } else if (catParam === 'energy') {
-        setSubtype('kwh_grid')
-      }
-    }
-    if (qtyParam) {
-      setQuantity(qtyParam)
-    }
-    if (descParam) {
-      setDescription(descParam)
-    }
-  }, [searchParams])
 
   // Handle category selector changes
   const handleCategoryChange = (newCat: Category) => {
@@ -106,9 +90,9 @@ const ActionLogFormInner: React.FC = () => {
 
     if (!validationResult.success) {
       const formattedErrors: Record<string, string> = {}
-      validationResult.error.errors.forEach((err) => {
-        if (err.path[0]) {
-          formattedErrors[err.path[0].toString()] = err.message
+      validationResult.error.issues.forEach((issue) => {
+        if (issue.path[0]) {
+          formattedErrors[issue.path[0].toString()] = issue.message
         }
       })
       setErrors(formattedErrors)

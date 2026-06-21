@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ insights, source })
-  } catch (err: any) {
+  } catch (err) {
     console.error('Error in assistant API:', err)
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
   }

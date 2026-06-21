@@ -2,19 +2,17 @@
 
 import React, { useState } from 'react'
 import { useLogStore } from '@/lib/state/useLogStore'
-import { selectWeeklyMetrics, selectTrendData } from '@/lib/state/selectors'
+import { selectWeeklyMetrics } from '@/lib/state/selectors'
 import { calculateEntryFootprint } from '@/lib/carbon/calculate'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import { Button } from '@/components/ui/Button'
 import { Category } from '@/types'
 
 export default function InsightsPage() {
-  const { entries, clearStore } = useLogStore()
+  const { entries } = useLogStore()
   const [filterCategory, setFilterCategory] = useState<Category | 'all'>('all')
 
   const weeklyMetrics = selectWeeklyMetrics(entries)
-  const trendData = selectTrendData(entries, 7)
 
   // Calculate followed suggestions savings
   // (We identify followed suggestions by descriptions containing "Substituted" or "plant-based" or custom tags)
@@ -190,7 +188,7 @@ export default function InsightsPage() {
                         {entry.quantity} {entry.unit} &bull; {formatDate(entry.date)}
                       </p>
                       {entry.description && (
-                        <p className="text-xs text-zinc-500 italic">"{entry.description}"</p>
+                        <p className="text-xs text-zinc-500 italic">&ldquo;{entry.description}&rdquo;</p>
                       )}
                     </div>
                   </div>

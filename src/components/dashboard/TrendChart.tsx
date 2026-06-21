@@ -67,7 +67,6 @@ export const TrendChart: React.FC = () => {
     { id: 'energy', label: 'Energy', colorClass: 'text-cyan-500 bg-cyan-500/10 border-cyan-500/20', gradientColors: 'from-cyan-500/20 to-transparent' },
   ]
 
-  const activeViewObj = views.find((v) => v.id === activeView)
 
   return (
     <Card className="p-6 space-y-4">

@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useTransition } from 'react'
+import React, { useState, useEffect, useTransition, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card } from '../ui/Card'
 import { Badge } from '../ui/Badge'
@@ -16,7 +16,7 @@ export const AssistantPanel: React.FC = () => {
   const [error, setError] = useState<string | null>(null)
 
   // Fetch insights from Assistant API
-  const fetchInsights = async () => {
+  const fetchInsights = useCallback(async () => {
     setError(null)
     try {
       const res = await fetch('/api/assistant', {
@@ -33,11 +33,11 @@ export const AssistantPanel: React.FC = () => {
 
       const data: AssistantResponse = await res.json()
       setResponse(data)
-    } catch (err: any) {
+    } catch (err) {
       console.error(err)
       setError('Could not reach the assistant. Falling back to offline mode.')
     }
-  }
+  }, [entries, baseline])
 
   // Refetch when entries or baseline configuration changes
   useEffect(() => {
@@ -46,7 +46,7 @@ export const AssistantPanel: React.FC = () => {
         await fetchInsights()
       })
     }
-  }, [entries, baseline])
+  }, [fetchInsights, entries.length, baseline])
 
   // Handle CTA button click (related action pre-fill)
   const handleRelatedAction = (action: Partial<typeof entries[0]>) => {
@@ -149,7 +149,7 @@ export const AssistantPanel: React.FC = () => {
             <div className="text-center py-6 text-zinc-500 space-y-2">
               <p className="text-xs">Your assistant is waiting for habit data.</p>
               <p className="text-[11px] text-zinc-600">
-                Log today's actions or load a sample week to unlock personalized carbon advice.
+                Log today&apos;s actions or load a sample week to unlock personalized carbon advice.
               </p>
             </div>
           )}

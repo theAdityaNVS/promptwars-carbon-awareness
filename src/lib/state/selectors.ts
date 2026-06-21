@@ -1,4 +1,4 @@
-import { LogEntry, Category } from '@/types'
+import { LogEntry } from '@/types'
 import { aggregateByPeriod } from '@/lib/carbon/calculate'
 
 // Helper to get date string in YYYY-MM-DD

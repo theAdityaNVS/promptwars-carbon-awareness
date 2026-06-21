@@ -33,7 +33,7 @@ export const FootprintSummaryCard: React.FC = () => {
       {/* Today's Footprint */}
       <div className="space-y-3 pb-6 md:pb-0">
         <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Today's Footprint</h3>
+          <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Today&apos;s Footprint</h3>
           <Badge variant="info">Live</Badge>
         </div>
         <div className="flex items-baseline gap-2">

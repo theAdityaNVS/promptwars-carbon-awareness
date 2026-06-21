@@ -1,5 +1,5 @@
 import { LogEntry, Category, UserBaseline } from '@/types'
-import { EMISSION_FACTORS, AVERAGE_COMMUTER_BENCHMARKS } from './factors'
+import { EMISSION_FACTORS } from './factors'
 
 /**
  * Calculates the CO2e footprint for a single log entry in kg.

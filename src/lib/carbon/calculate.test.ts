@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { calculateEntryFootprint, aggregateByPeriod, compareToBaseline } from './calculate'
-import { LogEntry, UserBaseline } from '@/types'
+import { calculateEntryFootprint, aggregateByPeriod } from './calculate'
+import { LogEntry } from '@/types'
 
 describe('Carbon Footprint Calculation Core', () => {
   describe('calculateEntryFootprint', () => {

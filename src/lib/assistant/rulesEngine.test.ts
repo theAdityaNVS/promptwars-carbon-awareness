@@ -13,7 +13,7 @@ describe('Carbon Assistant Rules Engine', () => {
     const baseline: UserBaseline = {
       commuteMode: 'car_solo',
       commuteKmPerWeek: 300, // Very high commute
-      dietPattern: 'low_meat',
+      dietPattern: 'high_meat',
       kwhPerWeek: 30,
     }
     const insights = generateInsights([], baseline)

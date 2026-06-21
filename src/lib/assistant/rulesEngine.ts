@@ -1,6 +1,6 @@
 import { LogEntry, UserBaseline, Insight } from '@/types'
 import { EMISSION_FACTORS, AVERAGE_COMMUTER_BENCHMARKS } from '../carbon/factors'
-import { calculateEntryFootprint, aggregateByPeriod } from '../carbon/calculate'
+import { calculateEntryFootprint } from '../carbon/calculate'
 
 /**
  * Evaluates a user's logged history and baseline configurations to return
