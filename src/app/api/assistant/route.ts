@@ -7,9 +7,21 @@ import { assistantRequestSchema } from '@/lib/utils/validation'
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>()
 const RATE_LIMIT_WINDOW_MS = 60 * 1000 // 1 minute
 const MAX_REQUESTS_PER_WINDOW = 20
+const RATE_LIMIT_MAP_SWEEP_THRESHOLD = 500 // evict expired entries once the map grows this large
 
 function checkRateLimit(ip: string): boolean {
   const now = Date.now()
+
+  // Prevent unbounded memory growth on long-lived (Fluid Compute) instances:
+  // sweep expired entries from other IPs once the map gets large.
+  if (rateLimitMap.size >= RATE_LIMIT_MAP_SWEEP_THRESHOLD) {
+    for (const [key, value] of rateLimitMap) {
+      if (now > value.resetTime) {
+        rateLimitMap.delete(key)
+      }
+    }
+  }
+
   const record = rateLimitMap.get(ip)
 
   if (!record) {

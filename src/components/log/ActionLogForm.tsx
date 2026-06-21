@@ -12,9 +12,9 @@ import { CategorySelector } from './CategorySelector'
 // Zod validation schemas
 const logEntrySchema = z.object({
   category: z.enum(['transport', 'diet', 'energy']),
-  subtype: z.string().min(1, 'Please select a specific action type'),
+  subtype: z.string().min(1, 'Please select a specific action type').max(50, 'Action subtype is too long'),
   quantity: z.number().positive('Quantity must be greater than zero').max(5000, 'Quantity is too large'),
-  unit: z.string().min(1),
+  unit: z.string().min(1).max(20, 'Unit is too long'),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format'),
   description: z.string().max(200, 'Description must be under 200 characters').optional(),
 })
