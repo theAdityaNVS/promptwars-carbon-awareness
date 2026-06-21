@@ -2,22 +2,15 @@
 
 import React, { useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { z } from 'zod'
 import { useLogStore } from '@/lib/state/useLogStore'
 import { Category } from '@/types'
+import { logEntrySchema } from '@/lib/utils/validation'
 import { Card } from '../ui/Card'
 import { Button } from '../ui/Button'
 import { CategorySelector } from './CategorySelector'
 
-// Zod validation schemas
-const logEntrySchema = z.object({
-  category: z.enum(['transport', 'diet', 'energy']),
-  subtype: z.string().min(1, 'Please select a specific action type').max(50, 'Action subtype is too long'),
-  quantity: z.number().positive('Quantity must be greater than zero').max(5000, 'Quantity is too large'),
-  unit: z.string().min(1).max(20, 'Unit is too long'),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format'),
-  description: z.string().max(200, 'Description must be under 200 characters').optional(),
-})
+// Reuse the canonical entry schema; `id` is generated locally after validation.
+const formEntrySchema = logEntrySchema.omit({ id: true })
 
 const ActionLogFormInner: React.FC = () => {
   const router = useRouter()
@@ -86,7 +79,7 @@ const ActionLogFormInner: React.FC = () => {
     }
 
     // Validate with Zod
-    const validationResult = logEntrySchema.safeParse(rawData)
+    const validationResult = formEntrySchema.safeParse(rawData)
 
     if (!validationResult.success) {
       const formattedErrors: Record<string, string> = {}

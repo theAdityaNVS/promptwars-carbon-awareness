@@ -248,61 +248,65 @@ export function generateInsights(
       return daysDiff >= 7 && daysDiff < 14
     })
 
-    // Spec's own example is solo car trips, but generalize the count comparison to
-    // each category's most emitting subtype so the heuristic isn't transport-only.
+    // Spec's own example is solo car trips, but the persona logs across transport,
+    // diet, and energy — so scan every (category, subtype) pair actually present in
+    // history rather than hardcoding just car_solo/beef_meal, and surface whichever
+    // rising pair carries the largest estimated impact.
     const countBySubtype = (entries: LogEntry[], category: Category, subtype: string) =>
       entries.filter((e) => e.category === category && e.subtype === subtype).length
 
-    const trendCandidates: { category: Category; subtype: string }[] = [
-      { category: 'transport', subtype: 'car_solo' },
-      { category: 'diet', subtype: 'beef_meal' },
-    ]
+    const observedPairs = Array.from(
+      new Set(sortedHistory.map((e) => `${e.category} ${e.subtype}`))
+    ).map((key) => {
+      const [category, subtype] = key.split(' ') as [Category, string]
+      return { category, subtype }
+    })
 
-    for (const { category, subtype } of trendCandidates) {
-      const thisWeekCount = countBySubtype(thisWeek, category, subtype)
+    let bestTrend: {
+      category: Category
+      subtype: string
+      thisWeekCount: number
+      lastWeekCount: number
+      impactKg: number
+    } | null = null
+
+    for (const { category, subtype } of observedPairs) {
+      const thisWeekEntries = thisWeek.filter((e) => e.category === category && e.subtype === subtype)
+      const thisWeekCount = thisWeekEntries.length
       const lastWeekCount = countBySubtype(lastWeek, category, subtype)
 
       // "Meaningful increase": at least 3 occurrences this week (mirrors the spec's
       // "3+ solo car trips" example) AND an increase of at least 1 over last week.
-      if (thisWeekCount >= 3 && thisWeekCount > lastWeekCount) {
-        if (category === 'transport') {
-          const thisWeekKm = thisWeek
-            .filter((e) => e.category === category && e.subtype === subtype)
-            .reduce((acc, curr) => acc + curr.quantity, 0)
-          const impactKg = thisWeekKm * (EMISSION_FACTORS.car_solo - EMISSION_FACTORS.car_shared)
-          insights.push({
-            id: 'trend_solo_car',
-            category: 'transport',
-            severity: 'warning',
-            message: `You've logged ${thisWeekCount} solo car trips this week, up from ${lastWeekCount} last week (totaling ${thisWeekKm} km). Switching some to carpools or transit could cut emissions in half.`,
-            estimatedImpactKg: Math.round(impactKg * 10) / 10,
-            relatedAction: {
-              category: 'transport',
-              subtype: 'car_shared',
-              quantity: Math.round(thisWeekKm / thisWeekCount),
-              unit: 'km',
-              description: 'Carpooled to work instead of solo driving',
-            },
-          })
-        } else {
-          const impactKg = (EMISSION_FACTORS.beef_meal - EMISSION_FACTORS.vegetarian_meal) * (thisWeekCount - lastWeekCount)
-          insights.push({
-            id: 'trend_beef_meals',
-            category: 'diet',
-            severity: 'warning',
-            message: `You've logged ${thisWeekCount} beef meals this week, up from ${lastWeekCount} last week. Swapping one for a plant-based meal can help reverse the trend.`,
-            estimatedImpactKg: Math.round(impactKg * 10) / 10,
-            relatedAction: {
-              category: 'diet',
-              subtype: 'vegetarian_meal',
-              quantity: 1,
-              unit: 'meal',
-              description: 'Substituted a beef meal for a vegetarian option',
-            },
-          })
-        }
-        break // Only flag one trend at a time, matching the existing single-spike convention
+      if (thisWeekCount < 3 || thisWeekCount <= lastWeekCount) continue
+
+      const extraOccurrences = thisWeekCount - lastWeekCount
+      const avgFootprintKg =
+        thisWeekEntries.reduce((acc, e) => acc + calculateEntryFootprint(e), 0) / thisWeekCount
+      const impactKg = avgFootprintKg * extraOccurrences
+
+      if (!bestTrend || impactKg > bestTrend.impactKg) {
+        bestTrend = { category, subtype, thisWeekCount, lastWeekCount, impactKg }
       }
+    }
+
+    if (bestTrend) {
+      const { category, subtype, thisWeekCount, lastWeekCount, impactKg } = bestTrend
+      const subtypeLabel = subtype.replace(/_/g, ' ')
+      const relatedAction =
+        category === 'transport'
+          ? { category: 'transport' as const, subtype: 'car_shared', quantity: 1, unit: 'km', description: 'Carpooled instead of driving solo' }
+          : category === 'diet'
+            ? { category: 'diet' as const, subtype: 'vegetarian_meal', quantity: 1, unit: 'meal', description: 'Substituted a plant-based meal' }
+            : { category: 'energy' as const, subtype: 'kwh_grid', quantity: 5, unit: 'kWh', description: 'Reduced home energy usage' }
+
+      insights.push({
+        id: `trend_${category}_${subtype}`,
+        category,
+        severity: 'warning',
+        message: `You've logged ${thisWeekCount} ${subtypeLabel} entries this week, up from ${lastWeekCount} last week. That trend is adding up — consider cutting back.`,
+        estimatedImpactKg: Math.round(impactKg * 10) / 10,
+        relatedAction,
+      })
     }
   }
 
@@ -379,5 +383,6 @@ export function generateInsights(
     })
   }
 
-  return insights.slice(0, 3) // Return top 1-3 insights
+  // Prioritize by estimated impact so the highest-value insight surfaces first.
+  return insights.sort((a, b) => b.estimatedImpactKg - a.estimatedImpactKg).slice(0, 3)
 }

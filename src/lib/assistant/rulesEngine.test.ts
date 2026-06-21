@@ -84,8 +84,8 @@ describe('Carbon Assistant Rules Engine', () => {
     ]
 
     const insights = generateInsights(history, null)
-    expect(insights.some((i) => i.id === 'trend_solo_car')).toBe(true)
-    const trendInsight = insights.find((i) => i.id === 'trend_solo_car')
+    expect(insights.some((i) => i.id === 'trend_transport_car_solo')).toBe(true)
+    const trendInsight = insights.find((i) => i.id === 'trend_transport_car_solo')
     expect(trendInsight?.estimatedImpactKg).toBeGreaterThan(0)
     // Message must reflect an actual week-over-week comparison, not just a raw
     // single-window count (which is what the old buggy implementation produced).
@@ -112,6 +112,66 @@ describe('Carbon Assistant Rules Engine', () => {
     // The old single-window implementation would have fired here (count >= 3 in
     // the last 7 days), but the week-over-week fix should not, since there was
     // no increase versus the prior week.
-    expect(insights.every((i) => i.id !== 'trend_solo_car')).toBe(true)
+    expect(insights.every((i) => i.id !== 'trend_transport_car_solo')).toBe(true)
+  })
+
+  it('should return insights sorted by estimatedImpactKg descending when multiple heuristics fire (prioritized insights)', () => {
+    const today = new Date()
+    const daysAgo = (n: number) => new Date(today.getTime() - n * 24 * 3600 * 1000).toISOString().split('T')[0]
+
+    const history: LogEntry[] = [
+      // 3 baseline solo car trips (5-7 days ago, low footprint) so the spike entry
+      // below has something to compare against.
+      { id: 'base1', date: daysAgo(5), category: 'transport', subtype: 'car_solo', quantity: 10, unit: 'km' },
+      { id: 'base2', date: daysAgo(6), category: 'transport', subtype: 'car_solo', quantity: 10, unit: 'km' },
+      { id: 'base3', date: daysAgo(7), category: 'transport', subtype: 'car_solo', quantity: 10, unit: 'km' },
+      // A large solo car trip today: footprint (38.4) is >2x the baseline average
+      // (1.92), and within the spike heuristic's 3-day window, so it fires
+      // HEURISTIC 3 (spike) with the largest estimatedImpactKg of any insight here.
+      { id: 'spike1', date: daysAgo(0), category: 'transport', subtype: 'car_solo', quantity: 200, unit: 'km' },
+      // 3 beef meals this week triggers HEURISTIC 2 (habit_red_meat), whose fixed
+      // impact (beef_meal - vegetarian_meal = 5.4 kg) is smaller than the spike's.
+      { id: 'meat1', date: daysAgo(0), category: 'diet', subtype: 'beef_meal', quantity: 1, unit: 'meal' },
+      { id: 'meat2', date: daysAgo(1), category: 'diet', subtype: 'beef_meal', quantity: 1, unit: 'meal' },
+      { id: 'meat3', date: daysAgo(2), category: 'diet', subtype: 'beef_meal', quantity: 1, unit: 'meal' },
+    ]
+
+    const insights = generateInsights(history, null)
+    expect(insights.some((i) => i.id === 'habit_red_meat')).toBe(true)
+    expect(insights.some((i) => i.id.startsWith('spike_'))).toBe(true)
+
+    // The spike insight has a strictly larger estimatedImpactKg than habit_red_meat,
+    // so a "prioritized insights" ordering must place it first.
+    const spikeInsight = insights.find((i) => i.id.startsWith('spike_'))!
+    const habitInsight = insights.find((i) => i.id === 'habit_red_meat')!
+    expect(spikeInsight.estimatedImpactKg).toBeGreaterThan(habitInsight.estimatedImpactKg)
+    expect(insights.indexOf(spikeInsight)).toBeLessThan(insights.indexOf(habitInsight))
+
+    for (let i = 1; i < insights.length; i++) {
+      expect(insights[i - 1].estimatedImpactKg).toBeGreaterThanOrEqual(insights[i].estimatedImpactKg)
+    }
+  })
+
+  it('should generalize the week-over-week trend heuristic to subtypes beyond car_solo/beef_meal (chicken_meal increase)', () => {
+    const today = new Date()
+    const daysAgo = (n: number) => new Date(today.getTime() - n * 24 * 3600 * 1000).toISOString().split('T')[0]
+
+    const history: LogEntry[] = [
+      // Earliest entry >= 14 days old so the trend gate is satisfied
+      { id: 'old0', date: daysAgo(15), category: 'diet', subtype: 'chicken_meal', quantity: 1, unit: 'meal' },
+      // Last week (8-14 days ago): 1 chicken meal
+      { id: 'lw1', date: daysAgo(10), category: 'diet', subtype: 'chicken_meal', quantity: 1, unit: 'meal' },
+      // This week (0-6 days ago): 4 chicken meals (increase vs last week's 1)
+      { id: 'tw1', date: daysAgo(1), category: 'diet', subtype: 'chicken_meal', quantity: 1, unit: 'meal' },
+      { id: 'tw2', date: daysAgo(2), category: 'diet', subtype: 'chicken_meal', quantity: 1, unit: 'meal' },
+      { id: 'tw3', date: daysAgo(3), category: 'diet', subtype: 'chicken_meal', quantity: 1, unit: 'meal' },
+      { id: 'tw4', date: daysAgo(4), category: 'diet', subtype: 'chicken_meal', quantity: 1, unit: 'meal' },
+    ]
+
+    const insights = generateInsights(history, null)
+    const trendInsight = insights.find((i) => i.id.startsWith('trend_'))
+    expect(trendInsight).toBeDefined()
+    expect(trendInsight?.message).toMatch(/up from 1 last week/i)
+    expect(trendInsight?.estimatedImpactKg).toBeGreaterThan(0)
   })
 })
